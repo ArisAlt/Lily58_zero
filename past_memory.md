@@ -16,3 +16,10 @@
   - Upgraded `KeyVisualizer_v2.html` "Show Wiring" SVG logic to use standard colored ribbon cable colors instead of static red/blue lines.
   - Implemented client-side `keymap.c` parsing in `KeyVisualizer_v2.html` using a parenthesis-tracking algorithm to handle nested QMK macros correctly.
   - Added a keycode translation dictionary to the visualizer to render raw `KC_` codes as human-friendly keycap legends in Top View.
+
+- **2026-04-28**:
+  - Added explicit MCU profile support for the "NRF52840 Dev Board (nice!nano V2.0 Compatible)" to `KeyVisualizer_v2.html` mirroring `nice_nano` pins, resolving a feature request.
+  - Implemented a dynamic "Hardware Peripherals" panel in `KeyVisualizer_v2.html` to support OLED screens (I2C) and Rotary Encoders. The panel gracefully falls back to recommended MCU-specific pins if explicit properties (`currentJSON.i2c` / `currentJSON.encoder`) are missing from the configuration JSON.
+  - Added an interactive "Assign Encoders" feature allowing users to visually click on matrix keys to convert them into Rotary Encoders. The tool automatically updates tooltips to reflect both the matrix click wiring and the rotary MCU wiring, significantly improving UX over static dropdowns.
+  - Excluded encoder positions from the SVG Matrix wiring loop so that matrix wires correctly bypass the physical encoder locations. Corrected default `boardProfiles` to use strictly free MCU pins to prevent tooltip overlaps with default matrix pins.
+  - Implemented Export features: `💾 Save JSON` dynamically injects the user's interactive encoder and I2C pin assignments into their configuration and downloads it. `📄 Copy C Code` generates the standard QMK `encoder_update_user` boilerplate for the `keymap.c` file based on the number of assigned encoders.

@@ -109,6 +109,48 @@
             box-shadow: 0 4px 15px rgba(0,0,0,0.5);
             white-space: pre-line;
         }
+        .peripherals-panel {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            background: rgba(24, 24, 37, 0.95);
+            border: 1px solid var(--key-bg);
+            border-radius: 8px;
+            padding: 15px;
+            z-index: 20;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+            font-family: monospace;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .peripheral-item {
+            border-left: 3px solid var(--accent);
+            padding-left: 10px;
+        }
+        .peripheral-title {
+            font-weight: bold;
+            color: var(--text-main);
+            margin-bottom: 5px;
+        }
+        .peripheral-pin {
+            font-size: 12px;
+            color: var(--text-sub);
+        }
+        .peripheral-pin strong {
+            color: var(--key-hover);
+        }
+        .encoder-key {
+            border-radius: 50% !important;
+            background: #45475a !important;
+            border: 3px dashed var(--accent) !important;
+        }
+        .assigning-mode .key {
+            cursor: crosshair !important;
+        }
+        .assigning-mode .key:hover {
+            box-shadow: 0 0 0 3px rgba(243, 139, 168, 0.5);
+        }
     </style>
 </head>
 <body>
@@ -140,6 +182,7 @@
                 <option value="rp2040_tiny">Raspberry Pi: RP2040-Tiny</option>
                 <option value="pro_micro">Arduino: Pro Micro (AVR)</option>
                 <option value="nice_nano">ZMK: nice!nano (nRF52840)</option>
+                <option value="nrf52840_nicenano_clone">ZMK: NRF52840 Dev Board (nice!nano v2.0 Compatible)</option>
             </select>
 
             <label style="margin-left: 15px; display: flex; align-items: center; gap: 5px; cursor: pointer; color: var(--text-sub); font-size: 14px; font-weight: bold;">
@@ -147,23 +190,41 @@
             </label>
 
             <button id="viewToggle">👀 View: Top (Keycaps)</button>
+            <button id="assignEncoderBtn" style="margin-left: 10px;">🎯 Assign Encoders: OFF</button>
+            <button id="saveJsonBtn" style="margin-left: 10px; background: var(--peach, #fab387); color: #11111b; font-weight: bold; display: none;">💾 Save JSON</button>
+            <button id="exportCodeBtn" style="margin-left: 5px; background: var(--green, #a6e3a1); color: #11111b; font-weight: bold; display: none;">📄 Copy C Code</button>
         </div>
     </div>
 
     <div id="stage"></div>
     <div id="tooltip"></div>
 
+    <div id="codeModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.8); z-index:100; align-items:center; justify-content:center;">
+        <div style="background:var(--bg); border:1px solid var(--key-bg); border-radius:8px; padding:20px; width:600px; max-width:90%;">
+            <h3 style="margin-top:0; color:var(--text-main);">keymap.c Encoder Boilerplate</h3>
+            <p style="font-size:12px; color:var(--text-sub);">Copy and paste this directly into your <code>keymap.c</code> file. Modify <code>KC_VOLU</code> and <code>KC_VOLD</code> to your desired actions.</p>
+            <textarea id="codeOutput" readonly style="width:100%; height:200px; background:#11111b; color:var(--text-main); border:1px solid var(--key-bg); padding:10px; font-family:monospace; margin-bottom:10px; resize:none;"></textarea>
+            <div style="display:flex; justify-content:flex-end; gap:10px;">
+                <button id="copyCodeBtn" style="background:var(--accent); color:#11111b;">📋 Copy to Clipboard</button>
+                <button id="closeModalBtn" style="background:var(--key-bg); color:var(--text-main);">Close</button>
+            </div>
+        </div>
+    </div>
+
     <script>
         const UNIT_SIZE = 55; // 1U = 55px
         let currentJSON = null;
         let isBottomView = false;
         let parsedKeymaps = null;
+        let isAssigningEncoder = false;
+        let assignedEncoders = [];
 
         const boardProfiles = {
-            "rp2040_zero": { rows: ["GP0", "GP1", "GP2", "GP3", "GP4", "GP5", "GP6"], cols: ["GP21", "GP20", "GP19", "GP18", "GP17", "GP16", "GP15", "GP14", "GP13", "GP12"] },
-            "rp2040_tiny": { rows: ["GP0", "GP1", "GP2", "GP3", "GP4", "GP5", "GP6"], cols: ["GP10", "GP9", "GP8", "GP7", "GP6", "GP5", "GP4", "GP3", "GP2", "GP1"] },
-            "pro_micro": { rows: ["D4", "C6", "D7", "E6", "B4", "B5"], cols: ["F4", "F5", "F6", "F7", "B1", "B3", "B2"] },
-            "nice_nano": { rows: ["P0.06", "P0.08", "P0.17", "P0.20", "P0.22", "P0.24"], cols: ["P0.31", "P0.29", "P0.02", "P1.15", "P1.13", "P1.11", "P0.10"] }
+            "rp2040_zero": { rows: ["GP0", "GP1", "GP2", "GP3", "GP4", "GP5", "GP6"], cols: ["GP21", "GP20", "GP19", "GP18", "GP17", "GP16", "GP15", "GP14", "GP13", "GP12"], periph: { sda: "GP26", scl: "GP27", enc_a: "GP28", enc_b: "GP29", enc2_a: "GP7", enc2_b: "GP8" } },
+            "rp2040_tiny": { rows: ["GP0", "GP1", "GP2", "GP3", "GP4", "GP5", "GP6"], cols: ["GP10", "GP9", "GP8", "GP7", "GP6", "GP5", "GP4", "GP3", "GP2", "GP1"], periph: { sda: "GP26", scl: "GP27", enc_a: "GP28", enc_b: "GP29", enc2_a: "GP14", enc2_b: "GP15" } },
+            "pro_micro": { rows: ["D4", "C6", "D7", "E6", "B4", "B5"], cols: ["F4", "F5", "F6", "F7", "B1", "B3", "B2"], periph: { sda: "D1", scl: "D0", enc_a: "D2", enc_b: "D3", enc2_a: "B6", enc2_b: "B7" } },
+            "nice_nano": { rows: ["P0.06", "P0.08", "P0.17", "P0.20", "P0.22", "P0.24"], cols: ["P0.31", "P0.29", "P0.02", "P1.15", "P1.13", "P1.11", "P0.10"], periph: { sda: "P1.04", scl: "P1.06", enc_a: "P0.09", enc_b: "P1.00", enc2_a: "P0.11", enc2_b: "P1.02" } },
+            "nrf52840_nicenano_clone": { rows: ["P0.06", "P0.08", "P0.17", "P0.20", "P0.22", "P0.24"], cols: ["P0.31", "P0.29", "P0.02", "P1.15", "P1.13", "P1.11", "P0.10"], periph: { sda: "P1.04", scl: "P1.06", enc_a: "P0.09", enc_b: "P1.00", enc2_a: "P0.11", enc2_b: "P1.02" } }
         };
 
         const uploadInput = document.getElementById('upload');
@@ -171,9 +232,109 @@
         const layerSelect = document.getElementById('layerSelect');
         const boardSelect = document.getElementById('boardSelect');
         const viewToggle = document.getElementById('viewToggle');
+        const assignEncoderBtn = document.getElementById('assignEncoderBtn');
         const showWiringCheckbox = document.getElementById('showWiring');
         const tooltip = document.getElementById('tooltip');
         const stage = document.getElementById('stage');
+
+        assignEncoderBtn.addEventListener('click', () => {
+            isAssigningEncoder = !isAssigningEncoder;
+            if (isAssigningEncoder) {
+                assignEncoderBtn.innerText = "🎯 Assign Encoders: ON";
+                assignEncoderBtn.style.background = "var(--accent)";
+                assignEncoderBtn.style.color = "#11111b";
+                stage.classList.add('assigning-mode');
+            } else {
+                assignEncoderBtn.innerText = "🎯 Assign Encoders: OFF";
+                assignEncoderBtn.style.background = "var(--key-bg)";
+                assignEncoderBtn.style.color = "var(--text-main)";
+                stage.classList.remove('assigning-mode');
+            }
+        });
+
+        const saveJsonBtn = document.getElementById('saveJsonBtn');
+        const exportCodeBtn = document.getElementById('exportCodeBtn');
+        const codeModal = document.getElementById('codeModal');
+        const codeOutput = document.getElementById('codeOutput');
+        const copyCodeBtn = document.getElementById('copyCodeBtn');
+        const closeModalBtn = document.getElementById('closeModalBtn');
+
+        closeModalBtn.addEventListener('click', () => {
+            codeModal.style.display = 'none';
+        });
+
+        copyCodeBtn.addEventListener('click', () => {
+            codeOutput.select();
+            document.execCommand('copy');
+            copyCodeBtn.innerText = "✅ Copied!";
+            setTimeout(() => copyCodeBtn.innerText = "📋 Copy to Clipboard", 2000);
+        });
+
+        exportCodeBtn.addEventListener('click', () => {
+            let code = `// QMK Rotary Encoder Configuration
+// Add this to your keymap.c file
+
+#if defined(ENCODER_MAP_ENABLE)
+const uint16_t PROGMEM encoder_map[][NUM_ENCODERS][NUM_DIRECTIONS] = {
+    [0] = { `;
+            if (assignedEncoders.length > 0) code += `ENCODER_CCW_CW(KC_VOLD, KC_VOLU)`;
+            if (assignedEncoders.length > 1) code += `, ENCODER_CCW_CW(KC_PGDN, KC_PGUP)`;
+            code += ` },
+    // Add additional layers here if needed
+    // [1] = { ENCODER_CCW_CW(KC_MEDIA_PREV_TRACK, KC_MEDIA_NEXT_TRACK) },
+};
+#endif
+
+bool encoder_update_user(uint8_t index, bool clockwise) {
+`;
+            if (assignedEncoders.length > 0) {
+                code += `    if (index == 0) {\n        if (clockwise) {\n            tap_code(KC_VOLU);\n        } else {\n            tap_code(KC_VOLD);\n        }\n    }\n`;
+            }
+            if (assignedEncoders.length > 1) {
+                code += `    else if (index == 1) {\n        if (clockwise) {\n            tap_code(KC_PGDN);\n        } else {\n            tap_code(KC_PGUP);\n        }\n    }\n`;
+            }
+            code += `    return false; // Return true to let keyboard level code run\n}\n`;
+
+            codeOutput.value = code;
+            codeModal.style.display = 'flex';
+        });
+
+        saveJsonBtn.addEventListener('click', () => {
+            if (!currentJSON) return;
+            
+            // Deep clone to avoid mutating the live state unintentionally
+            let exportJSON = JSON.parse(JSON.stringify(currentJSON));
+            
+            const selectedProfile = boardSelect.value;
+            let profilePeriph = boardProfiles[selectedProfile] ? boardProfiles[selectedProfile].periph : null;
+            
+            if (profilePeriph) {
+                // Inject I2C if not explicitly defined
+                if (!exportJSON.i2c) {
+                    exportJSON.i2c = { pin_sda: profilePeriph.sda, pin_scl: profilePeriph.scl };
+                }
+
+                if (assignedEncoders.length > 0) {
+                    let rotaryArr = [];
+                    if (assignedEncoders.length > 0) {
+                        rotaryArr.push({ pin_a: profilePeriph.enc_a, pin_b: profilePeriph.enc_b });
+                    }
+                    if (assignedEncoders.length > 1) {
+                        rotaryArr.push({ pin_a: profilePeriph.enc2_a, pin_b: profilePeriph.enc2_b });
+                    }
+                    if (!exportJSON.encoder) exportJSON.encoder = {};
+                    exportJSON.encoder.rotary = rotaryArr;
+                }
+            }
+
+            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(exportJSON, null, 2));
+            const downloadAnchorNode = document.createElement('a');
+            downloadAnchorNode.setAttribute("href", dataStr);
+            downloadAnchorNode.setAttribute("download", "keyboard_updated.json");
+            document.body.appendChild(downloadAnchorNode);
+            downloadAnchorNode.click();
+            downloadAnchorNode.remove();
+        });
 
         uploadInput.addEventListener('change', function(e) {
             const file = e.target.files[0];
@@ -368,6 +529,30 @@
                 matrixRowsCount = Math.floor((max_r + 1) / 2) || 5;
             }
 
+            let sda = "N/A", scl = "N/A", enc_a = "N/A", enc_b = "N/A", enc2_a = "N/A", enc2_b = "N/A";
+            
+            if (currentJSON.i2c) {
+                sda = currentJSON.i2c.pin_sda || currentJSON.i2c.sda || sda;
+                scl = currentJSON.i2c.pin_scl || currentJSON.i2c.scl || scl;
+            } else if (boardProfiles[selectedProfile] && boardProfiles[selectedProfile].periph) {
+                sda = boardProfiles[selectedProfile].periph.sda;
+                scl = boardProfiles[selectedProfile].periph.scl;
+            }
+
+            if (currentJSON.encoder && currentJSON.encoder.rotary && currentJSON.encoder.rotary.length > 0) {
+                enc_a = currentJSON.encoder.rotary[0].pin_a || enc_a;
+                enc_b = currentJSON.encoder.rotary[0].pin_b || enc_b;
+                if(currentJSON.encoder.rotary.length > 1) {
+                    enc2_a = currentJSON.encoder.rotary[1].pin_a || enc2_a;
+                    enc2_b = currentJSON.encoder.rotary[1].pin_b || enc2_b;
+                }
+            } else if (boardProfiles[selectedProfile] && boardProfiles[selectedProfile].periph) {
+                enc_a = boardProfiles[selectedProfile].periph.enc_a;
+                enc_b = boardProfiles[selectedProfile].periph.enc_b;
+                enc2_a = boardProfiles[selectedProfile].periph.enc2_a || "N/A";
+                enc2_b = boardProfiles[selectedProfile].periph.enc2_b || "N/A";
+            }
+
             // Pass 1: Find physical board width to calculate mirroring
             let max_x_logical = 0;
             let max_y = 0;
@@ -383,6 +568,7 @@
             // Pass 2: Draw keys
             let rowGroups = {};
             let colGroups = {};
+            let encoderPositions = [];
 
             layout.forEach((key, index) => {
                 const div = document.createElement('div');
@@ -429,17 +615,49 @@
                     const rowKey = side + "_" + normalizedRow;
                     const colKey = side + "_" + c;
 
-                    if (!rowGroups[rowKey]) rowGroups[rowKey] = [];
-                    if (!colGroups[colKey]) colGroups[colKey] = [];
+                    let rowKeyForEnc = r + "_" + c;
+                    let encIdx = assignedEncoders.indexOf(rowKeyForEnc);
+                    let isEncoder = encIdx !== -1;
 
-                    rowGroups[rowKey].push({x: cx, y: cy});
-                    colGroups[colKey].push({x: cx, y: cy});
+                    // Only push to matrix SVG lines if it's NOT an encoder
+                    if (!isEncoder) {
+                        if (!rowGroups[rowKey]) rowGroups[rowKey] = [];
+                        if (!colGroups[colKey]) colGroups[colKey] = [];
 
-                    if (!isBottomView && keycode) {
+                        rowGroups[rowKey].push({x: cx, y: cy});
+                        colGroups[colKey].push({x: cx, y: cy});
+                    }
+
+                    if (isEncoder) {
+                        encoderPositions.push({x: cx, y: cy, idx: encIdx});
+                        div.classList.add('encoder-key');
+                        div.style.width = Math.min(w * UNIT_SIZE, h * UNIT_SIZE) + 'px';
+                        div.style.height = div.style.width;
+                        const diffW = (w * UNIT_SIZE) - parseFloat(div.style.width);
+                        const diffH = (h * UNIT_SIZE) - parseFloat(div.style.height);
+                        div.style.left = (draw_x * UNIT_SIZE + diffW/2) + 'px';
+                        div.style.top = (y * UNIT_SIZE + diffH/2) + 'px';
+                        div.innerHTML = `<div style="font-size:24px;">🔄</div>`;
+                    } else if (!isBottomView && keycode) {
                         div.innerHTML = `<div class="keycode" title="${keycode}">${humanizeKeycode(keycode)}</div><div class="pins" style="color:var(--text-sub)">[${r}, ${c}]</div>`;
                     } else {
                         div.innerHTML = `<div class="matrix">[${r}, ${c}]</div><div class="pins">${rowPin} | ${colPin}</div>`;
                     }
+
+                    div.addEventListener('click', () => {
+                        if (isAssigningEncoder) {
+                            if (isEncoder) {
+                                assignedEncoders = assignedEncoders.filter(e => e !== rowKeyForEnc);
+                            } else {
+                                if(assignedEncoders.length < 2) {
+                                    assignedEncoders.push(rowKeyForEnc);
+                                } else {
+                                    alert("Maximum 2 encoders supported currently.");
+                                }
+                            }
+                            renderKeyboard();
+                        }
+                    });
                 } else {
                     if (!isBottomView && keycode) {
                         div.innerHTML = `<div class="keycode" title="${keycode}">${humanizeKeycode(keycode)}</div>`;
@@ -455,9 +673,17 @@
                     if (key.matrix) {
                         sideText = (key.matrix[0] >= matrixRowsCount) ? "RIGHT HALF" : "LEFT HALF";
                         matrixText = `[${key.matrix[0]}, ${key.matrix[1]}]`;
+                        let encIdx = assignedEncoders.indexOf(key.matrix[0] + "_" + key.matrix[1]);
+                        if (encIdx !== -1) {
+                            let ea = encIdx === 0 ? enc_a : enc2_a;
+                            let eb = encIdx === 0 ? enc_b : enc2_b;
+                            tooltip.innerHTML = `📍 **Encoder ${encIdx+1}** (${sideText}) ${viewState}\nMatrix [Row, Col]: ${matrixText} (Click Switch)\n\nSolder Click Row to: 👉 **${rowPin}**\nSolder Click Col to: 👉 **${colPin}**\n\nSolder Rotary Pin A: 👉 **${ea}**\nSolder Rotary Pin B: 👉 **${eb}**`;
+                        } else {
+                            tooltip.innerHTML = `📍 **${key.label || 'KEY'}** (${sideText}) ${viewState}${kcText}\nMatrix [Row, Col]: ${matrixText}\n\nSolder Row to:   👉 **${rowPin}**\nSolder Col to:   👉 **${colPin}**`;
+                        }
+                    } else {
+                        tooltip.innerHTML = `📍 **${key.label || 'KEY'}** (${sideText}) ${viewState}${kcText}\nMatrix [Row, Col]: ${matrixText}\n\nSolder Row to:   👉 **${rowPin}**\nSolder Col to:   👉 **${colPin}**`;
                     }
-
-                    tooltip.innerHTML = `📍 **${key.label || 'KEY'}** (${sideText}) ${viewState}${kcText}\nMatrix [Row, Col]: ${matrixText}\n\nSolder Row to:   👉 **${rowPin}**\nSolder Col to:   👉 **${colPin}**`;
                     tooltip.style.display = 'block';
                 });
                 div.addEventListener('mouseleave', () => {
@@ -519,11 +745,64 @@
                     colorIndex++;
                 });
 
+                // Draw Encoder Rotary Pins (A/B)
+                encoderPositions.forEach(pos => {
+                    let y_offset = 35; 
+                    
+                    // Pin A
+                    let polyA = document.createElementNS("http://www.w3.org/2000/svg", "line");
+                    polyA.setAttribute("x1", pos.x - 12);
+                    polyA.setAttribute("y1", pos.y);
+                    polyA.setAttribute("x2", pos.x - 12);
+                    polyA.setAttribute("y2", pos.y + y_offset);
+                    polyA.setAttribute("stroke", "var(--peach, #fab387)");
+                    polyA.setAttribute("stroke-width", "4");
+                    polyA.setAttribute("stroke-dasharray", "6,4");
+                    svg.appendChild(polyA);
+
+                    // Pin B
+                    let polyB = document.createElementNS("http://www.w3.org/2000/svg", "line");
+                    polyB.setAttribute("x1", pos.x + 12);
+                    polyB.setAttribute("y1", pos.y);
+                    polyB.setAttribute("x2", pos.x + 12);
+                    polyB.setAttribute("y2", pos.y + y_offset);
+                    polyB.setAttribute("stroke", "var(--peach, #fab387)");
+                    polyB.setAttribute("stroke-width", "4");
+                    polyB.setAttribute("stroke-dasharray", "6,4");
+                    svg.appendChild(polyB);
+                });
+
                 stage.appendChild(svg);
             }
 
-            stage.style.width = (max_x_logical * UNIT_SIZE + 20) + 'px';
-            stage.style.height = (max_y * UNIT_SIZE + 20) + 'px';
+            // Add extra width to ensure the Peripherals Panel doesn't overlap the keys
+            stage.style.width = (max_x_logical * UNIT_SIZE + 280) + 'px';
+            stage.style.height = Math.max(max_y * UNIT_SIZE + 20, 250) + 'px';
+
+            // Render Hardware Peripherals Panel
+            const periphPanel = document.createElement('div');
+            periphPanel.className = 'peripherals-panel';
+            periphPanel.innerHTML = `
+                <div style="font-weight:bold; border-bottom:1px solid #313244; padding-bottom:5px; margin-bottom:5px;">🔌 Hardware Peripherals</div>
+                <div class="peripheral-item">
+                    <div class="peripheral-title">OLED Display (I2C)</div>
+                    <div class="peripheral-pin">SDA Pin: <strong>${sda}</strong></div>
+                    <div class="peripheral-pin">SCL Pin: <strong>${scl}</strong></div>
+                </div>
+                <div class="peripheral-item">
+                    <div class="peripheral-title">Rotary Encoder</div>
+                    <div class="peripheral-pin">Pin A: <strong>${enc_a}</strong></div>
+                    <div class="peripheral-pin">Pin B: <strong>${enc_b}</strong></div>
+                </div>
+            `;
+            stage.appendChild(periphPanel);
+            
+            saveJsonBtn.style.display = "inline-block";
+            if (assignedEncoders.length > 0) {
+                exportCodeBtn.style.display = "inline-block";
+            } else {
+                exportCodeBtn.style.display = "none";
+            }
         }
     </script>
 </body>

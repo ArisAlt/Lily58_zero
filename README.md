@@ -12,8 +12,14 @@ The **QMK Wiring Visualizer 2.0** is a web-based, single-page application design
   - Raspberry Pi RP2040-Tiny
   - Arduino Pro Micro (AVR)
   - ZMK nice!nano (nRF52840)
+  - ZMK NRF52840 Dev Board (nice!nano V2.0 Compatible)
 - **Top and Bottom Views**: Toggle between viewing the keyboard from the top (keycaps) and the bottom (wiring/solder view, which horizontally mirrors the layout).
 - **Interactive Tooltips**: Hover over keys to see exact matrix coordinates `[row, col]` and the specific pins to solder for your selected MCU.
+- **Hardware Peripherals Panel**: Dynamically displays recommended or JSON-configured pins for OLED displays (I2C SDA/SCL) and Rotary Encoders (Pin A/Pin B).
+- **Interactive Encoder Assignment**: Click the "🎯 Assign Encoders" button to convert any key in the visualizer into a Rotary Encoder, visually transforming it and updating its wiring tooltips.
+- **Export Capabilities**:
+  - **💾 Save JSON**: Instantly inject your encoder and I2C pin assignments into your `keyboard.json` and download the updated layout file.
+  - **📄 Copy C Code**: Generates standard QMK `encoder_update_user` boilerplate for your `keymap.c` file based on your assigned encoders.
 - **Standalone App**: Entirely contained in a single HTML file—no server or installation required.
 
 ## Usage
