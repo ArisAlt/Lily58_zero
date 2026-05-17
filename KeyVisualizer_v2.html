@@ -40,7 +40,7 @@
             border: 1px solid var(--key-bg);
             flex-wrap: wrap;
         }
-        select, input[type="file"], button {
+        select, input[type="file"], input[type="text"], button {
             background: var(--key-bg);
             padding: 0.5rem 1rem;
             border-radius: 6px;
@@ -89,8 +89,8 @@
             transform: translateY(-2px);
             z-index: 10;
         }
-        .matrix { font-size: 14px; font-weight: bold; pointer-events: none;}
-        .pins { font-size: 10px; color: var(--accent); margin-top: 4px; pointer-events: none; font-weight: bold;}
+        .matrix { font-size: 13px; font-weight: bold; pointer-events: none; white-space: nowrap;}
+        .pins { font-size: 9px; color: var(--accent); margin-top: 4px; pointer-events: none; font-weight: bold; white-space: nowrap;}
         .key:hover .pins { color: #11111b; }
         .keycode { font-size: 11px; font-weight: bold; pointer-events: none; max-width: 90%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: center; color: var(--text-main); }
         .key:hover .keycode { color: #11111b; }
@@ -163,14 +163,26 @@
 
         <div class="controls">
             <div style="display:flex; flex-direction:column; gap:5px;">
-                <label style="font-size:12px; color:var(--text-sub);">Layout JSON:</label>
-                <input type="file" id="upload" accept=".json">
+                <label style="font-size:12px; color:var(--text-sub);">QMK API Search:</label>
+                <div style="display:flex; gap: 5px;">
+                    <input type="text" id="qmkSearch" placeholder="e.g. lily58/rev1" style="width: 150px; font-family: monospace;">
+                    <button id="fetchQmkBtn" style="padding: 0.5rem; background: var(--accent); color: #11111b;">Fetch</button>
+                </div>
+            </div>
+
+            <div style="display:flex; flex-direction:column; gap:5px;">
+                <label style="font-size:12px; color:var(--text-sub);">Local JSON (Optional):</label>
+                <div style="display:flex; gap: 5px;">
+                    <input type="file" id="upload" accept=".json" style="max-width: 150px;" title="Upload QMK info.json">
+                    <button id="importKleBtn" style="padding: 0.5rem; background: var(--peach, #fab387); color: #11111b;" title="Import raw KLE Layout">Import KLE</button>
+                </div>
             </div>
 
             <div style="display:flex; flex-direction:column; gap:5px;">
                 <label style="font-size:12px; color:var(--text-sub);">keymap.c (Optional):</label>
                 <div style="display:flex; gap: 5px;">
-                    <input type="file" id="keymapUpload" accept=".c">
+                    <input type="file" id="keymapUpload" accept=".c,.json" style="max-width: 150px;">
+                    <button id="fetchKeymapBtn" style="padding: 0.5rem; background: var(--accent); color: #11111b; display: none;">⬇️ Fetch</button>
                     <select id="layerSelect" style="display:none;"></select>
                 </div>
             </div>
@@ -178,11 +190,12 @@
             <label for="boardSelect">MCU Profile:</label>
             <select id="boardSelect">
                 <option value="json_file">📄 Read Pins from JSON</option>
-                <option value="rp2040_zero">Raspberry Pi: RP2040-Zero</option>
-                <option value="rp2040_tiny">Raspberry Pi: RP2040-Tiny</option>
-                <option value="pro_micro">Arduino: Pro Micro (AVR)</option>
-                <option value="nice_nano">ZMK: nice!nano (nRF52840)</option>
-                <option value="nrf52840_nicenano_clone">ZMK: NRF52840 Dev Board (nice!nano v2.0 Compatible)</option>
+                <option value="waveshare_2040_plus">Waveshare RP2040 Plus (Split)</option>
+                <option value="rp2040_zero">Waveshare RP2040 Zero (Split)</option>
+                <option value="rp2040_tiny">Waveshare RP2040 Tiny (Split)</option>
+                <option value="pro_micro">Arduino Pro Micro (ATmega32U4)</option>
+                <option value="nice_nano">nice!nano v2.0 (nRF52840)</option>
+                <option value="nrf52840_nicenano_clone">SuperMini nRF52840 (nice!nano Clone)</option>
             </select>
 
             <label style="margin-left: 15px; display: flex; align-items: center; gap: 5px; cursor: pointer; color: var(--text-sub); font-size: 14px; font-weight: bold;">
@@ -190,27 +203,48 @@
             </label>
 
             <button id="viewToggle">👀 View: Top (Keycaps)</button>
-            <button id="assignEncoderBtn" style="margin-left: 10px;">🎯 Assign Encoders: OFF</button>
-            <button id="saveJsonBtn" style="margin-left: 10px; background: var(--peach, #fab387); color: #11111b; font-weight: bold; display: none;">💾 Save JSON</button>
-            <button id="exportCodeBtn" style="margin-left: 5px; background: var(--green, #a6e3a1); color: #11111b; font-weight: bold; display: none;">📄 Copy C Code</button>
+            <button id="clearAllBtn" style="margin-left: 10px; background: var(--red, #f38ba8); color: #11111b; font-weight: bold;">🗑️ Clear All</button>
+
         </div>
     </div>
+
+    <div id="warningBanner" style="display:none; background: rgba(243, 139, 168, 0.2); border: 2px solid var(--accent); color: var(--accent); padding: 15px; border-radius: 8px; margin-top: 15px; font-weight: bold; text-align: center;"></div>
 
     <div id="stage"></div>
     <div id="tooltip"></div>
 
-    <div id="codeModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.8); z-index:100; align-items:center; justify-content:center;">
-        <div style="background:var(--bg); border:1px solid var(--key-bg); border-radius:8px; padding:20px; width:600px; max-width:90%;">
-            <h3 style="margin-top:0; color:var(--text-main);">keymap.c Encoder Boilerplate</h3>
-            <p style="font-size:12px; color:var(--text-sub);">Copy and paste this directly into your <code>keymap.c</code> file. Modify <code>KC_VOLU</code> and <code>KC_VOLD</code> to your desired actions.</p>
-            <textarea id="codeOutput" readonly style="width:100%; height:200px; background:#11111b; color:var(--text-main); border:1px solid var(--key-bg); padding:10px; font-family:monospace; margin-bottom:10px; resize:none;"></textarea>
+
+    <div id="kleModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.8); z-index:100; align-items:center; justify-content:center;">
+        <div style="background:var(--bg); border:1px solid var(--peach, #fab387); border-radius:8px; padding:20px; width:600px; max-width:90%;">
+            <h3 style="margin-top:0; color:var(--peach, #fab387);">Import KLE Layout</h3>
+            <p style="font-size:12px; color:var(--text-sub);">Paste your raw JSON from <a href="https://editor.keyboard-tools.xyz/" target="_blank" style="color:var(--blue, #89b4fa);">editor.keyboard-tools.xyz</a> below. The visualizer will auto-route the matrix based on physical positions.</p>
+            
+            <label style="display:block; margin-bottom:10px; font-size:14px; color:var(--text-main);">
+                <input type="checkbox" id="kleIsSplit" checked> Is this a Split Keyboard? (Check if it has left/right halves)
+            </label>
+            
+            <div style="margin-bottom: 15px; display:flex; flex-direction:column; gap:5px;">
+                <label style="font-size:12px; color:var(--text-sub);">Target Microcontroller:</label>
+                <select id="kleBoardSelect" style="width: 100%; padding: 5px; background: #11111b; color: var(--text-main); border: 1px solid var(--key-bg);">
+                    <option value="auto">Auto-Select (Best Fit)</option>
+                    <option value="waveshare_2040_plus">Waveshare RP2040-Plus</option>
+                    <option value="rp2040_zero">RP2040 Zero</option>
+                    <option value="rp2040_tiny">RP2040 Tiny</option>
+                    <option value="pro_micro">Pro Micro (ATmega32U4)</option>
+                    <option value="nice_nano">nice!nano</option>
+                    <option value="nrf52840_nicenano_clone">SuperMini nRF52840</option>
+                </select>
+            </div>
+            
+            <textarea id="kleInput" placeholder='[["Esc","Q","W","E"...]]' style="width:100%; height:200px; background:#11111b; color:var(--text-main); border:1px solid var(--key-bg); padding:10px; font-family:monospace; margin-bottom:10px; resize:none; box-sizing: border-box;"></textarea>
+            
             <div style="display:flex; justify-content:flex-end; gap:10px;">
-                <button id="copyCodeBtn" style="background:var(--accent); color:#11111b;">📋 Copy to Clipboard</button>
-                <button id="closeModalBtn" style="background:var(--key-bg); color:var(--text-main);">Close</button>
+                <button id="processKleBtn" style="background:var(--peach, #fab387); color:#11111b;">🚀 Auto-Route Matrix</button>
+                <button id="closeKleModalBtn" style="background:var(--key-bg); color:var(--text-main);">Cancel</button>
             </div>
         </div>
     </div>
 
-    <script src="KeyVisualizer_v2.js"></script>
+    <script src="KeyVisualizer_v2.js?v=2"></script>
 </body>
 </html>
