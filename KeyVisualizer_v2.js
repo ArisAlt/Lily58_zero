@@ -26,6 +26,7 @@ const UNIT_SIZE = 55; // 1U = 55px
         const viewToggle = document.getElementById('viewToggle');
         const clearAllBtn = document.getElementById('clearAllBtn');
         const warningBanner = document.getElementById('warningBanner');
+        const exportVialZipBtn = document.getElementById('exportVialZipBtn');
         
         if (clearAllBtn) {
             clearAllBtn.addEventListener('click', () => {
@@ -34,6 +35,7 @@ const UNIT_SIZE = 55; // 1U = 55px
                 const existingSvg = document.getElementById('routingLayer');
                 if (existingSvg) existingSvg.remove();
                 warningBanner.style.display = 'none';
+                exportVialZipBtn.style.display = 'none';
                 if (fetchKeymapBtn) fetchKeymapBtn.style.display = 'none';
                 layerSelect.style.display = 'none';
                 parsedKeymaps = null;
@@ -302,7 +304,7 @@ const UNIT_SIZE = 55; // 1U = 55px
                     numLogicalCols = 0;
                     let perHalfRows = 0; // Only meaningful for split keyboards (rows per MCU)
 
-                    const isSplit = kleIsSplit.checked;
+                    const isSplit = kleIsSplit.value === "true";
 
                     // Find physical midpoint (largest horizontal gap in the centre 30% of the board)
                     let max_x = 0;
@@ -434,6 +436,7 @@ const UNIT_SIZE = 55; // 1U = 55px
 
                     kleModal.style.display = 'none';
                     renderKeyboard();
+                    exportVialZipBtn.style.display = 'inline-block';
                     alert("KLE layout successfully imported and auto-routed!");
 
                 } catch (e) {
@@ -843,6 +846,7 @@ const UNIT_SIZE = 55; // 1U = 55px
 
                     const cx = (draw_x * UNIT_SIZE) + (w * UNIT_SIZE / 2);
                     const cy = (y * UNIT_SIZE) + (h * UNIT_SIZE / 2);
+                    const ZONE = UNIT_SIZE * 0.22;
                     
                     const rowKey = side + "_" + normalizedRow;
                     const colKey = side + "_" + c;
@@ -850,8 +854,8 @@ const UNIT_SIZE = 55; // 1U = 55px
                     if (!rowGroups[rowKey]) rowGroups[rowKey] = [];
                     if (!colGroups[colKey]) colGroups[colKey] = [];
 
-                    rowGroups[rowKey].push({x: cx, y: cy});
-                    colGroups[colKey].push({x: cx, y: cy});
+                    rowGroups[rowKey].push({x: cx, y: cy - ZONE});
+                    colGroups[colKey].push({x: cx, y: cy + ZONE});
 
                     if (!isBottomView && keycode) {
                         div.innerHTML = `<div class="keycode" title="${keycode}">${humanizeKeycode(keycode)}</div><div class="pins" style="color:${validation.errors.has(index) ? 'var(--accent)' : 'var(--text-sub)'}">[${r}, ${c}]</div>`;
@@ -934,95 +938,40 @@ const UNIT_SIZE = 55; // 1U = 55px
                 ];
                 let colorIndex = 0;
 
-                const half = UNIT_SIZE / 2;
+                const drawChain = (pts, color, dash) => {
+                    for (let i = 0; i < pts.length - 1; i++) {
+                        const l = document.createElementNS("http://www.w3.org/2000/svg", "line");
+                        l.setAttribute("x1", pts[i].x); l.setAttribute("y1", pts[i].y);
+                        l.setAttribute("x2", pts[i+1].x); l.setAttribute("y2", pts[i+1].y);
+                        l.setAttribute("stroke", color);
+                        l.setAttribute("stroke-width", "5");
+                        l.setAttribute("stroke-linecap", "round");
+                        if (dash) l.setAttribute("stroke-dasharray", dash);
+                        svg.appendChild(l);
+                    }
+                    pts.forEach(p => {
+                        const d = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+                        d.setAttribute("cx", p.x); d.setAttribute("cy", p.y);
+                        d.setAttribute("r", "4.5"); d.setAttribute("fill", color);
+                        svg.appendChild(d);
+                    });
+                };
 
-                // Draw ROWS: Each row is a horizontal bus.
-                // Rule: connect key centers left-to-right with a horizontal wire at their average Y.
+                // Draw ROWS: Connect anchors left-to-right
                 Object.values(rowGroups).forEach(group => {
                     if (group.length < 1) return;
-                    // Sort left to right
                     group.sort((a, b) => a.x - b.x);
-                    // Find the average Y for this row group to use as the bus rail
-                    const avgY = group.reduce((s, p) => s + p.y, 0) / group.length;
                     const color = ribbonColors[colorIndex % ribbonColors.length];
-
-                    // Draw one horizontal bus rail spanning the full row
-                    const busLine = document.createElementNS("http://www.w3.org/2000/svg", "line");
-                    busLine.setAttribute("x1", group[0].x);
-                    busLine.setAttribute("y1", avgY);
-                    busLine.setAttribute("x2", group[group.length - 1].x);
-                    busLine.setAttribute("y2", avgY);
-                    busLine.setAttribute("stroke", color);
-                    busLine.setAttribute("stroke-width", "3");
-                    busLine.setAttribute("stroke-linecap", "round");
-                    svg.appendChild(busLine);
-
-                    // Draw a vertical stub from each key center down to the bus rail
-                    group.forEach(p => {
-                        if (Math.abs(p.y - avgY) > 2) {
-                            const stub = document.createElementNS("http://www.w3.org/2000/svg", "line");
-                            stub.setAttribute("x1", p.x);
-                            stub.setAttribute("y1", p.y);
-                            stub.setAttribute("x2", p.x);
-                            stub.setAttribute("y2", avgY);
-                            stub.setAttribute("stroke", color);
-                            stub.setAttribute("stroke-width", "2");
-                            stub.setAttribute("stroke-dasharray", "4,3");
-                            svg.appendChild(stub);
-                        }
-                        // Dot at each key connection point
-                        const dot = document.createElementNS("http://www.w3.org/2000/svg", "circle");
-                        dot.setAttribute("cx", p.x);
-                        dot.setAttribute("cy", avgY);
-                        dot.setAttribute("r", "4");
-                        dot.setAttribute("fill", color);
-                        svg.appendChild(dot);
-                    });
+                    drawChain(group, color, ""); // solid
                     colorIndex++;
                 });
 
-                // Draw COLS: Each column is a vertical chain (diode chain).
-                // Rule: drop a straight vertical wire connecting each key's center top-to-bottom.
+                // Draw COLS: Connect anchors top-to-bottom
                 Object.values(colGroups).forEach(group => {
                     if (group.length < 1) return;
-                    // Sort top to bottom
                     group.sort((a, b) => a.y - b.y);
-                    // Find the average X for this column group (true vertical)
-                    const avgX = group.reduce((s, p) => s + p.x, 0) / group.length;
                     const color = ribbonColors[colorIndex % ribbonColors.length];
-
-                    // Draw one vertical bus dropping the full column
-                    const busLine = document.createElementNS("http://www.w3.org/2000/svg", "line");
-                    busLine.setAttribute("x1", avgX);
-                    busLine.setAttribute("y1", group[0].y);
-                    busLine.setAttribute("x2", avgX);
-                    busLine.setAttribute("y2", group[group.length - 1].y);
-                    busLine.setAttribute("stroke", color);
-                    busLine.setAttribute("stroke-width", "3");
-                    busLine.setAttribute("stroke-linecap", "round");
-                    svg.appendChild(busLine);
-
-                    // Draw a horizontal stub from each key center to the column bus
-                    group.forEach(p => {
-                        if (Math.abs(p.x - avgX) > 2) {
-                            const stub = document.createElementNS("http://www.w3.org/2000/svg", "line");
-                            stub.setAttribute("x1", p.x);
-                            stub.setAttribute("y1", p.y);
-                            stub.setAttribute("x2", avgX);
-                            stub.setAttribute("y2", p.y);
-                            stub.setAttribute("stroke", color);
-                            stub.setAttribute("stroke-width", "2");
-                            stub.setAttribute("stroke-dasharray", "4,3");
-                            svg.appendChild(stub);
-                        }
-                        // Diode triangle symbol at each key connection
-                        const dot = document.createElementNS("http://www.w3.org/2000/svg", "circle");
-                        dot.setAttribute("cx", avgX);
-                        dot.setAttribute("cy", p.y);
-                        dot.setAttribute("r", "4");
-                        dot.setAttribute("fill", color);
-                        svg.appendChild(dot);
-                    });
+                    drawChain(group, color, "10,6"); // dash
                     colorIndex++;
                 });
 
@@ -1031,5 +980,308 @@ const UNIT_SIZE = 55; // 1U = 55px
 
             stage.style.width = (max_x_logical * UNIT_SIZE + 20) + 'px';
             stage.style.height = Math.max(max_y * UNIT_SIZE + 20, 250) + 'px';
+        }
+
+
+        // ============================================================
+        // VIAL FIRMWARE ZIP EXPORT
+        // Per official docs: https://get.vial.today/docs/porting-to-vial.html
+        // ============================================================
+        if (exportVialZipBtn) {
+            exportVialZipBtn.addEventListener('click', () => {
+                if (!currentJSON) { alert('No layout loaded. Import a KLE first.'); return; }
+                if (typeof JSZip === 'undefined') { alert('JSZip not loaded. Check internet connection.'); return; }
+
+                const layout      = extractLayout(currentJSON);
+                const matrixPins  = currentJSON.matrix_pins || { rows: [], cols: [] };
+                const activeRows  = matrixPins.rows || [];
+                const activeCols  = matrixPins.cols || [];
+                const numRows     = activeRows.length;
+                const numCols     = activeCols.length;
+                const isSplit     = currentJSON.split || false;
+                const selectedProfile = boardSelect.value;
+
+                // Logical matrix size (split: 2x physical MCU rows)
+                let logicalRows = numRows;
+                if (isSplit) {
+                    let maxRow = 0;
+                    layout.forEach(k => { if (k.matrix && k.matrix[0] > maxRow) maxRow = k.matrix[0]; });
+                    logicalRows = maxRow + 1;
+                }
+
+                // MCU detection from board profile
+                const mcuMap = {
+                    rp2040_zero:             { mcu: 'RP2040',     boot: 'rp2040'      },
+                    rp2040_tiny:             { mcu: 'RP2040',     boot: 'rp2040'      },
+                    waveshare_2040_plus:     { mcu: 'RP2040',     boot: 'rp2040'      },
+                    pro_micro:               { mcu: 'atmega32u4', boot: 'caterina'    },
+                    nice_nano:               { mcu: 'nRF52840',   boot: 'nrfmicro_13' },
+                    nrf52840_nicenano_clone: { mcu: 'nRF52840',   boot: 'nrfmicro_13' },
+                };
+                const mcuInfo = mcuMap[selectedProfile] || { mcu: 'RP2040', boot: 'rp2040' };
+
+                // 8-byte random Vial UID
+                const uid = Array.from({length: 8}, () =>
+                    '0x' + Math.floor(Math.random() * 256).toString(16).toUpperCase().padStart(2, '0')
+                ).join(', ');
+
+                // Keyboard folder name
+                const kbName = (currentJSON.keyboard_name || 'custom_handwired')
+                    .toLowerCase().replace(/[^a-z0-9]/g, '_');
+                const layoutName = currentJSON.layouts
+                    ? (Object.keys(currentJSON.layouts)[0] || 'LAYOUT')
+                    : 'LAYOUT';
+
+                // 4-layer KC_TRNS keymap
+                const keymapArgs = layout.map(() => 'KC_TRNS').join(', ');
+                const keymapC = [
+                    `// SPDX-License-Identifier: GPL-2.0-or-later`,
+                    `// Auto-generated by QMK Wiring Visualizer 2.0`,
+                    ``,
+                    `#include QMK_KEYBOARD_H`,
+                    ``,
+                    `const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {`,
+                    `    [0] = ${layoutName}(${keymapArgs}),`,
+                    `    [1] = ${layoutName}(${keymapArgs}),`,
+                    `    [2] = ${layoutName}(${keymapArgs}),`,
+                    `    [3] = ${layoutName}(${keymapArgs}),`,
+                    `};`,
+                ].join('\n');
+
+                // Keyboard-level config.h
+                const splitLine = isSplit ? [
+                    ``,
+                    `// Split keyboard — REQUIRED: configure your serial/TRRS communication pin`,
+                    `// Uncomment and set the correct TX pin for your wiring:`,
+                    `// #define SERIAL_USART_FULL_DUPLEX         // use for UART (full duplex)`,
+                    `// #define SERIAL_USART_TX_PIN GP0          // TX pin on left half`,
+                    `// #define SERIAL_USART_RX_PIN GP1          // RX pin on right half`,
+                    `// Or for simple single-wire (half-duplex):`,
+                    `// #define SOFT_SERIAL_PIN D2               // for Pro Micro`,
+                    `#define SPLIT_USB_DETECT`,
+                ].join('\n') : '';
+                const configH = [
+                    `// SPDX-License-Identifier: GPL-2.0-or-later`,
+                    `// Auto-generated by QMK Wiring Visualizer 2.0`,
+                    `#pragma once`,
+                    ``,
+                    `#define MATRIX_ROWS ${logicalRows}`,
+                    `#define MATRIX_COLS ${numCols}`,
+                    `#define MATRIX_ROW_PINS { ${activeRows.join(', ')} }`,
+                    `#define MATRIX_COL_PINS { ${activeCols.join(', ')} }`,
+                    `#define DIODE_DIRECTION COL2ROW${splitLine}`,
+                ].join('\n');
+
+                // keyboard.h
+                const keyboardH = [
+                    `// SPDX-License-Identifier: GPL-2.0-or-later`,
+                    `#pragma once`,
+                    ``,
+                    `#include "quantum.h"`,
+                ].join('\n');
+
+                // Keyboard-level rules.mk — MCU only, NO VIA/VIAL
+                const rulesMk = [
+                    `# Auto-generated by QMK Wiring Visualizer 2.0`,
+                    `# DO NOT add VIA_ENABLE/VIAL_ENABLE here — put in keymaps/vial/rules.mk`,
+                    ``,
+                    `MCU = ${mcuInfo.mcu}`,
+                    `BOOTLOADER = ${mcuInfo.boot}`,
+                ].join('\n');
+
+                // keymaps/vial/rules.mk
+                const vialRulesMk = [
+                    `# Vial keymap rules — both lines required, do not remove VIA_ENABLE`,
+                    `VIA_ENABLE = yes`,
+                    `VIAL_ENABLE = yes`,
+                ].join('\n');
+
+                // keymaps/vial/config.h
+                const vialConfigH = [
+                    `/* SPDX-License-Identifier: GPL-2.0-or-later */`,
+                    `#pragma once`,
+                    ``,
+                    `/* Unique Vial keyboard ID */`,
+                    `#define VIAL_KEYBOARD_UID {${uid}}`,
+                    ``,
+                    `/* Unlock combo: hold [0,0]+[0,1] for ~3s to unlock security settings */`,
+                    `#define VIAL_UNLOCK_COMBO_ROWS { 0, 0 }`,
+                    `#define VIAL_UNLOCK_COMBO_COLS { 0, 1 }`,
+                ].join('\n');
+
+                // info.json (QMK format)
+                const infoJSON = {
+                    keyboard_name: kbName,
+                    manufacturer: currentJSON.manufacturer || 'Custom Handwired',
+                    url: '',
+                    maintainer: 'handwired',
+                    usb: { vid: '0xFEED', pid: '0x0000', device_version: '0.0.1' },
+                    processor: mcuInfo.mcu,
+                    bootloader: mcuInfo.boot,
+                    diode_direction: 'COL2ROW',
+                    ...(isSplit ? { split: { enabled: true } } : {}),
+                    matrix_pins: { rows: activeRows, cols: activeCols },
+                    layouts: {
+                        [layoutName]: {
+                            layout: layout.map(k => {
+                                const e = {};
+                                if (k.matrix) e.matrix = k.matrix;
+                                e.x = parseFloat((k.x || 0).toFixed(2));
+                                e.y = parseFloat((k.y || 0).toFixed(2));
+                                if (k.w && k.w !== 1) e.w = parseFloat(k.w.toFixed(2));
+                                if (k.h && k.h !== 1) e.h = parseFloat(k.h.toFixed(2));
+                                return e;
+                            })
+                        }
+                    }
+                };
+
+                // vial.json — KLE format where each key label = "row,col"
+                function buildVialKLE(keys) {
+                    const ROW_TOL = 0.7;
+                    let rowBands = [];
+                    [...keys].sort((a,b) =>
+                        (a.cy||(a.y||0)+(a.h||1)/2) - (b.cy||(b.y||0)+(b.h||1)/2)
+                    ).forEach(k => {
+                        const ky = k.cy || (k.y||0) + (k.h||1)/2;
+                        let band = rowBands.find(b => Math.abs(b.avgY - ky) < ROW_TOL);
+                        if (band) {
+                            band.keys.push(k);
+                            band.avgY = band.keys.reduce((s,x) => s+(x.cy||(x.y||0)+(x.h||1)/2),0)/band.keys.length;
+                        } else {
+                            rowBands.push({ avgY: ky, keys: [k] });
+                        }
+                    });
+                    rowBands.sort((a,b) => a.avgY - b.avgY);
+
+                    return rowBands.map(band => {
+                        const sorted = [...band.keys].sort((a,b) =>
+                            (a.cx||(a.x||0)+(a.w||1)/2) - (b.cx||(b.x||0)+(b.w||1)/2)
+                        );
+                        const kleRow = [];
+                        let curX = 0;
+                        sorted.forEach(k => {
+                            const kx  = parseFloat((k.x || 0).toFixed(4));
+                            const kw  = parseFloat((k.w || 1).toFixed(4));
+                            const gap = parseFloat((kx - curX).toFixed(4));
+                            const meta = {};
+                            if (gap > 0.02) meta.x = parseFloat(gap.toFixed(2));
+                            if (kw !== 1)   meta.w = kw;
+                            if (Object.keys(meta).length > 0) kleRow.push(meta);
+                            kleRow.push(k.matrix ? `${k.matrix[0]},${k.matrix[1]}` : '0,0');
+                            curX = kx + kw;
+                        });
+                        return kleRow;
+                    });
+                }
+
+                const vialJSON = {
+                    name: kbName,
+                    vendorId: '0xFEED',
+                    productId: '0x0000',
+                    lighting: 'none',
+                    matrix: { rows: logicalRows, cols: numCols },
+                    layouts: { keymap: buildVialKLE(layout) }
+                };
+
+                // INSTALL.md — compile instructions bundled with the ZIP
+                const installMd = [
+`# ${kbName} — Vial Firmware: Compile & Flash Guide`,
+`> Auto-generated by QMK Wiring Visualizer 2.0`,
+``,
+`## Prerequisites`,
+`- A working [QMK build environment](https://docs.qmk.fm/#/newbs_getting_started)`,
+`- Git`,
+``,
+`## Step 1 — Clone vial-qmk (once)`,
+`\`\`\`bash`,
+`git clone https://github.com/vial-kb/vial-qmk.git`,
+`cd vial-qmk && make git-submodule`,
+`\`\`\``,
+`> ⚠️ Keep vial-qmk **outside** your existing qmk_firmware folder to avoid conflicts.`,
+``,
+`## Step 2 — Copy your keyboard`,
+`Extract the ZIP and copy the keyboard folder:`,
+`\`\`\`bash`,
+`cp -r ${kbName}/  vial-qmk/keyboards/handwired/`,
+`\`\`\``,
+``,
+`## Step 3 — Verify environment`,
+`\`\`\`bash`,
+`cd vial-qmk`,
+`qmk doctor`,
+`\`\`\``,
+`The only expected warning is about the upstream remote. Everything else should be green.`,
+``,
+`## Step 4 — Compile`,
+`\`\`\`bash`,
+`make handwired/${kbName}:vial`,
+`\`\`\``,
+`> Use \`make\`, **not** \`qmk compile\` — the latter targets QMK firmware, not Vial.`,
+``,
+`## Step 5 — Flash`,
+`\`\`\`bash`,
+`make handwired/${kbName}:vial:flash`,
+`\`\`\``,
+`Or flash the generated \`.uf2\` / \`.hex\` manually via [QMK Toolbox](https://github.com/qmk/qmk_toolbox/releases).`,
+`Put your board in **bootloader mode** first.`,
+``,
+`## After Flashing`,
+`1. Open [Vial GUI](https://get.vial.today/download/) — your keyboard should be auto-detected.`,
+`2. Go to **Security → Unlock** and hold the top-left two keys (~3s) to unlock editing.`,
+`3. Remap keys, layers, macros — all in real time without reflashing.`,
+``,
+`## Unlock Combo`,
+`| Key | Matrix |`,
+`|-----|--------|`,
+`| Key 1 | Row 0, Col 0 |`,
+`| Key 2 | Row 0, Col 1 |`,
+                ].join('\n');
+
+                // Assemble ZIP
+                const zip = new JSZip();
+                const kb  = zip.folder(kbName);
+                kb.file('INSTALL.md', installMd);
+                kb.file('config.h',   configH);
+                kb.file('info.json',  JSON.stringify(infoJSON, null, 2));
+                kb.file('keyboard.h', keyboardH);
+                kb.file('rules.mk',   rulesMk);
+
+                const keymapsFolder = kb.folder('keymaps');
+                keymapsFolder.folder('default').file('keymap.c', keymapC);
+
+                const vialKm = keymapsFolder.folder('vial');
+                vialKm.file('keymap.c',  keymapC);
+                vialKm.file('rules.mk',  vialRulesMk);
+                vialKm.file('config.h',  vialConfigH);
+                vialKm.file('vial.json', JSON.stringify(vialJSON, null, 2));
+
+                zip.generateAsync({ type: 'blob' }).then(blob => {
+                    const url = URL.createObjectURL(blob);
+                    const a   = document.createElement('a');
+                    a.href     = url;
+                    a.download = `${kbName}_vial.zip`;
+                    document.body.appendChild(a);
+                    a.click();
+                    a.remove();
+                    URL.revokeObjectURL(url);
+
+                    // Show compile instructions modal with actual keyboard name filled in
+                    const modal = document.getElementById('vialCompileModal');
+                    ['compileKbName','compileKbName2','compileKbName3'].forEach(id => {
+                        const el = document.getElementById(id);
+                        if (el) el.textContent = kbName;
+                    });
+                    if (modal) modal.style.display = 'flex';
+                });
+            });
+
+            // Close button
+            const closeVialCompileBtn = document.getElementById('closeVialCompileBtn');
+            if (closeVialCompileBtn) {
+                closeVialCompileBtn.addEventListener('click', () => {
+                    document.getElementById('vialCompileModal').style.display = 'none';
+                });
+            }
         }
 
